@@ -1,504 +1,485 @@
-# Partie 1 — Vagrant et K3s
+# Inception of Things (IoT) — Part 1
 
-## Introduction
+## 1. Présentation du projet
 
-La première partie du projet **Inception of Things (IoT)** consiste à mettre en place un environnement Kubernetes léger à l'aide de **Vagrant** et **K3s**.
+La première partie du projet **Inception of Things** consiste à mettre en place une infrastructure virtualisée composée de deux machines virtuelles Debian, puis à déployer un cluster Kubernetes léger avec K3s.
 
-L'objectif est de créer deux machines virtuelles qui formeront un cluster K3s. La première machine fonctionnera comme **K3s Server (Controller)** et la deuxième comme **K3s Agent (ServerWorker)**.
+Le cluster est constitué de :
 
-Dans mon environnement de travail, le projet est réalisé à l'intérieur d'une machine virtuelle Debian. **VirtualBox** est utilisé pour exécuter cette machine Debian, puis **Vagrant** est installé à l'intérieur de Debian afin de créer et gérer les machines virtuelles nécessaires au projet.
+- Un nœud **K3s Server**, qui joue le rôle de control plane.
+- Un nœud **K3s Agent**, qui rejoint le serveur en tant que worker.
 
-L'architecture générale est donc la suivante :
+La création et la configuration des machines virtuelles sont réalisées avec **Vagrant** et **VirtualBox**.
 
-    Machine physique
-          |
-          v
-      VirtualBox
-          |
-          v
-      VM Debian
-          |
-          v
-       Vagrant
-          |
-       +--+--+
-       |     |
-       v     v
-    Server  Agent
+## 2. Architecture
 
-
-## Objectifs de la Partie 1
-
-La Partie 1 a pour objectif de :
-
-- créer deux machines virtuelles avec Vagrant ;
-- utiliser une distribution Linux stable ;
-- configurer les ressources des machines ;
-- définir les noms des machines ;
-- configurer des adresses IP privées fixes ;
-- permettre la communication entre les deux machines ;
-- configurer l'accès SSH sans mot de passe ;
-- installer K3s en mode Server sur la première machine ;
-- installer K3s en mode Agent sur la deuxième machine ;
-- connecter l'Agent au Server ;
-- installer et utiliser `kubectl`.
-
-
-## Environnement de virtualisation
-
-Le projet est exécuté dans une machine virtuelle Debian.
-
-L'environnement utilise donc une virtualisation imbriquée :
-
-    Machine physique
-          |
-          v
-      VirtualBox
-          |
-          v
-      VM Debian
-       "khmessah"
-          |
-          v
-       Vagrant
-          |
-          v
-      VirtualBox
-       /       \
-      /         \
-     v           v
-  khmessahS   khmessahSW
-
-
-### VirtualBox
-
-**VirtualBox** est l'hyperviseur utilisé pour créer et exécuter les machines
-virtuelles.
-
-Dans ce projet, VirtualBox est utilisé à deux niveaux :
-
-1. pour exécuter la machine virtuelle Debian principale ;
-2. comme provider de Vagrant pour créer les deux machines virtuelles du
-   projet.
-
-### Vagrant
-
-**Vagrant** est utilisé pour automatiser la création et la gestion des
-machines virtuelles.
-
-La configuration des machines est définie dans le fichier :
-
-    p1/Vagrantfile
-
-Vagrant utilise VirtualBox comme provider afin de créer les machines
-virtuelles définies dans le `Vagrantfile`.
-
-
-## Virtualisation imbriquée
-
-Comme Vagrant est exécuté à l'intérieur d'une machine virtuelle Debian,
-VirtualBox doit lui-même pouvoir créer d'autres machines virtuelles.
-
-Cela nécessite l'activation de la virtualisation imbriquée
-(**Nested Virtualization**).
-
-La configuration utilisée est :
-
-    Nested VT-x/AMD-V: enabled
-    Nested Paging: enabled
-
-Cette configuration permet à VirtualBox exécuté dans la machine Debian
-d'utiliser les fonctionnalités de virtualisation du processeur.
-
-
-## Les deux machines virtuelles
-
-La Partie 1 nécessite deux machines virtuelles.
-
-### Machine Server
-
-Nom :
-
-    khmessahS
-
-Adresse IP :
-
-    192.168.56.110
-
-Rôle :
-
-    K3s Server / Controller
-
-Ressources :
-
-    CPU : 1
-    RAM : 1024 MB
-
-
-### Machine Agent
-
-Nom :
-
-    khmessahSW
-
-Adresse IP :
-
-    192.168.56.111
-
-Rôle :
-
-    K3s Agent / ServerWorker
-
-Ressources :
-
-    CPU : 1
-    RAM : 1024 MB
-
-
-L'architecture finale est :
-
-                    K3s Cluster
+```text
+                    Host Machine
                          |
-              +----------+----------+
-              |                     |
-              v                     v
-        khmessahS              khmessahSW
-        K3s Server              K3s Agent
-        192.168.56.110          192.168.56.111
-
-
-## Vagrantfile
-
-Le fichier `Vagrantfile` contient la configuration des deux machines.
-
-Il permet de définir :
-
-- la distribution utilisée ;
-- le provider VirtualBox ;
-- le nom des machines ;
-- les hostnames ;
-- les adresses IP ;
-- la mémoire RAM ;
-- le nombre de CPU ;
-- la configuration réseau.
-
-
-### Définition du Server
-
-Le Server est défini avec :
-
-    config.vm.define "khmessahS"
-
-Son hostname est :
-
-    khmessahS
-
-Son adresse IP privée est :
-
-    192.168.56.110
-
-
-### Définition de l'Agent
-
-L'Agent est défini avec :
-
-    config.vm.define "khmessahSW"
-
-Son hostname est :
-
-    khmessahSW
-
-Son adresse IP privée est :
-
-    192.168.56.111
-
-
-## Réseau privé
-
-Un réseau privé est utilisé afin de permettre aux deux machines de
-communiquer directement entre elles.
-
-Le Server possède :
-
-    192.168.56.110
-
-L'Agent possède :
-
-    192.168.56.111
-
-La communication peut être vérifiée avec la commande `ping`.
-
-Depuis le Server :
-
-    ping 192.168.56.111
-
-Depuis l'Agent :
-
-    ping 192.168.56.110
-
-
-## SSH
-
-Les machines doivent pouvoir être accessibles en SSH sans avoir besoin
-d'entrer un mot de passe manuellement.
-
-Vagrant fournit une commande permettant de se connecter directement aux
-machines :
-
-    vagrant ssh khmessahS
-
-et :
-
-    vagrant ssh khmessahSW
-
-La configuration SSH est nécessaire pour permettre la gestion et la
-communication entre les machines.
-
-
-## K3s
-
-**K3s** est une distribution légère de Kubernetes.
-
-Dans cette partie, K3s est installé sur les deux machines avec deux rôles
-différents :
-
-- le Server fonctionne comme contrôleur du cluster ;
-- l'Agent rejoint le cluster et exécute les workloads.
-
-
-## K3s Server
-
-Le K3s Server est installé sur :
-
-    khmessahS
-
-avec l'adresse :
-
-    192.168.56.110
-
-Le Server est responsable de la gestion du cluster Kubernetes.
-
-Il fournit le control plane qui permet notamment de gérer les nœuds et les
-workloads du cluster.
-
-
-## K3s Agent
-
-Le K3s Agent est installé sur :
-
-    khmessahSW
-
-avec l'adresse :
-
-    192.168.56.111
-
-L'Agent rejoint le cluster géré par le K3s Server.
-
-Pour rejoindre le cluster, l'Agent utilise l'adresse du Server ainsi que le
-token d'authentification fourni lors de l'installation du K3s Server.
-
-
-## Connexion entre Server et Agent
-
-Le fonctionnement attendu est :
-
-                  K3s Server
-                 192.168.56.110
-                       |
-                       | IP + Token
-                       |
-                       v
-                  K3s Agent
-                 192.168.56.111
-
-Une fois l'Agent correctement configuré, les deux machines appartiennent au
-même cluster K3s.
-
-
-## kubectl
-
-`kubectl` est l'outil en ligne de commande utilisé pour communiquer avec un
-cluster Kubernetes.
-
-Il permet notamment de vérifier l'état des nœuds du cluster.
-
-Une commande importante est :
-
-    kubectl get nodes
-
-Elle permet de vérifier que les nœuds du cluster sont correctement
-enregistrés.
-
-D'autres commandes utiles sont :
-
-    kubectl get pods -A
-
-et :
-
-    kubectl get nodes -o wide
-
-
-## Commandes Vagrant utiles
-
-### Vérifier la version de Vagrant
-
-    vagrant --version
-
-
-### Vérifier le Vagrantfile
-
-    vagrant validate
-
-
-### Démarrer le Server
-
-    vagrant up khmessahS
-
-
-### Démarrer l'Agent
-
-    vagrant up khmessahSW
-
-
-### Démarrer les deux machines
-
-    vagrant up
-
-
-### Vérifier l'état des machines
-
-    vagrant status
-
-
-### Se connecter au Server
-
-    vagrant ssh khmessahS
-
-
-### Se connecter à l'Agent
-
-    vagrant ssh khmessahSW
-
-
-### Arrêter les machines
-
-    vagrant halt
-
-
-### Supprimer les machines
-
-    vagrant destroy
-
-
-## Vérification du réseau
-
-Après le démarrage des machines, la configuration réseau peut être vérifiée
-avec :
-
-    ip a
-
-Cette commande permet d'afficher les interfaces réseau et leurs adresses IP.
-
-La connectivité entre les deux machines peut ensuite être testée avec :
-
-    ping 192.168.56.110
-
-et :
-
-    ping 192.168.56.111
-
-
-## Vérification du cluster K3s
-
-Une fois K3s installé sur les deux machines et l'Agent connecté au Server,
-le cluster peut être vérifié avec :
-
-    kubectl get nodes
-
-Le résultat doit permettre d'identifier les nœuds du cluster K3s.
-
-
-## Structure du projet
-
-La structure de la Partie 1 est :
-
-    p1/
+                    VirtualBox
+                         |
+                  Debian VM (iot)
+                         |
+                       Vagrant
+                         |
+          +--------------+--------------+
+          |                             |
+     khmessahS                    khmessahSW
+     K3s Server                   K3s Agent
+          |                             |
+   192.168.56.110              192.168.56.111
+          |                             |
+          +---------- K3s --------------+
+                    Cluster
+```
+
+### Configuration des machines
+
+| Paramètre  | Server         | Agent          |
+| ---------- | -------------- | -------------- |
+| Nom        | khmessahS      | khmessahSW     |
+| Système    | Debian         | Debian         |
+| CPU        | 1              | 1              |
+| RAM        | 1024 MB        | 1024 MB        |
+| Adresse IP | 192.168.56.110 | 192.168.56.111 |
+| Rôle       | Control Plane  | Worker         |
+| Kubernetes | K3s Server     | K3s Agent      |
+
+## 3. Environnement utilisé
+
+- VirtualBox
+- Vagrant
+- Debian
+- K3s
+- kubectl
+- SSH
+- Réseau privé VirtualBox
+
+## 4. Structure du projet
+
+```text
+iot/
+└── p1/
     ├── Vagrantfile
     ├── README.md
     ├── scripts/
     └── confs/
+```
 
+- `Vagrantfile` : définition et configuration des machines virtuelles.
+- `scripts/` : scripts d'installation et de configuration éventuels.
+- `confs/` : fichiers de configuration éventuels.
+- `README.md` : documentation de la partie 1.
 
-### Vagrantfile
+## 5. Création des machines virtuelles
 
-Contient la configuration des machines virtuelles.
+### 5.1 Initialisation du projet
 
-### scripts/
+Depuis la machine Debian principale :
 
-Contient les scripts utilisés pour automatiser l'installation et la
-configuration de l'environnement.
+```bash
+mkdir -p ~/Desktop/iot/p1
+cd ~/Desktop/iot/p1
 
-### confs/
+mkdir -p scripts confs
+```
 
-Contient les fichiers de configuration nécessaires au projet.
+### 5.2 Configuration du Vagrantfile
 
+Le fichier `Vagrantfile` définit les deux machines virtuelles.
 
-## État d'avancement
+```ruby
+Vagrant.configure("2") do |config|
 
-### Environnement
+  config.vm.box = "debian/testing64"
 
-- [x] Installation de Vagrant
-- [x] Installation de VirtualBox
-- [x] Création de la machine Debian principale
-- [x] Activation de la virtualisation imbriquée
-- [x] Configuration de VirtualBox comme provider Vagrant
+  config.vm.define "khmessahS" do |server|
 
-### Machines virtuelles
+    server.vm.hostname = "khmessahS"
 
-- [x] Création de `khmessahS`
-- [x] Création de `khmessahSW`
-- [x] Configuration de l'adresse `192.168.56.110`
-- [x] Configuration de l'adresse `192.168.56.111`
-- [x] Configuration de 1 CPU
-- [x] Configuration de 1024 MB de RAM
+    server.vm.network "private_network",
+      ip: "192.168.56.110"
 
-### K3s
+    server.vm.provider "virtualbox" do |vb|
+      vb.gui = true
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
 
-- [ ] Installation du K3s Server
-- [ ] Récupération du token
-- [ ] Installation du K3s Agent
-- [ ] Connexion de l'Agent au Server
-- [ ] Vérification du cluster
+  end
 
-### kubectl
+  config.vm.define "khmessahSW" do |worker|
 
-- [ ] Installation de kubectl
-- [ ] Vérification des nœuds avec `kubectl get nodes`
+    worker.vm.hostname = "khmessahSW"
 
-## Résultat attendu
+    worker.vm.network "private_network",
+      ip: "192.168.56.111"
 
-À la fin de la Partie 1, nous devons obtenir un cluster K3s composé de deux
-machines :
+    worker.vm.provider "virtualbox" do |vb|
+      vb.gui = true
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
 
-    +-----------------------------------+
-    |           K3s Cluster             |
-    |                                   |
-    |  +-------------+ +-------------+  |
-    |  | khmessahS   | | khmessahSW  |  |
-    |  | Server      | | Agent       |  |
-    |  | .110        | | .111        |  |
-    |  +-------------+ +-------------+  |
-    +-----------------------------------+
+  end
 
-Le Server contrôle le cluster et l'Agent est connecté au Server pour
-participer à l'exécution des workloads Kubernetes.
+end
+```
 
-## Conclusion
+**Remarque :** la box utilisée dans la configuration est `debian/testing64`. Elle correspond à Debian Testing et non à une version stable. Si la consigne exige strictement la dernière version stable, ce point doit être harmonisé avant la validation finale.
 
-Cette première partie permet de mettre en place l'infrastructure de base du
-projet Inception of Things. Vagrant automatise la création des machines,
-VirtualBox fournit l'environnement de virtualisation et K3s permet de créer
-le cluster Kubernetes léger composé d'un Server et d'un Agent.
+### 5.3 Démarrage des VMs
 
-Une fois le réseau, SSH, K3s et kubectl correctement configurés et vérifiés,
-la Partie 1 sera complète.
+```bash
+vagrant up
+```
+
+Afficher les machines :
+
+```bash
+vagrant status
+```
+
+Se connecter au serveur :
+
+```bash
+vagrant ssh khmessahS
+```
+
+Se connecter au worker :
+
+```bash
+vagrant ssh khmessahSW
+```
+
+## 6. Configuration réseau
+
+Les deux machines utilisent un réseau privé avec des adresses IP statiques.
+
+| Machine    | Adresse IP     |
+| ---------- | -------------- |
+| khmessahS  | 192.168.56.110 |
+| khmessahSW | 192.168.56.111 |
+
+### Vérification des adresses IP
+
+Sur le serveur :
+
+```bash
+ip -4 addr
+```
+
+Sur le worker :
+
+```bash
+ip -4 addr
+```
+
+Vérifier la communication entre les deux machines :
+
+```bash
+ping -c 4 192.168.56.111
+```
+
+Depuis le worker :
+
+```bash
+ping -c 4 192.168.56.110
+```
+
+## 7. Configuration SSH
+
+L'objectif est de permettre une connexion SSH sans saisie de mot de passe entre les deux machines.
+
+### 7.1 Génération de la clé SSH
+
+Sur le serveur :
+
+```bash
+ssh-keygen -t ed25519
+```
+
+Valider les choix proposés pour générer la clé.
+
+### 7.2 Copie de la clé publique
+
+```bash
+ssh-copy-id vagrant@192.168.56.111
+```
+
+### 7.3 Vérification
+
+```bash
+ssh vagrant@192.168.56.111
+```
+
+La connexion SSH a été testée entre les deux machines.
+
+## 8. Installation de K3s Server
+
+Le serveur K3s est installé sur la machine :
+
+```text
+khmessahS
+192.168.56.110
+```
+
+### 8.1 Installation
+
+Sur le serveur :
+
+```bash
+curl -sfL https://get.k3s.io | sh -
+```
+
+### 8.2 Configuration de l'adresse IP du serveur
+
+Lors de la configuration initiale, K3s utilisait l'adresse NAT `10.0.2.15`.
+
+Pour utiliser l'adresse IP privée prévue dans le projet, le fichier de configuration suivant a été créé :
+
+```bash
+sudo mkdir -p /etc/rancher/k3s
+sudo nano /etc/rancher/k3s/config.yaml
+```
+
+Contenu :
+
+```yaml
+node-ip: 192.168.56.110
+advertise-address: 192.168.56.110
+```
+
+Cette configuration permet au serveur K3s d'utiliser l'adresse IP privée pour son identification et l'annonce de son adresse.
+
+### 8.3 Redémarrage du service
+
+```bash
+sudo systemctl restart k3s
+```
+
+Vérifier le service :
+
+```bash
+sudo systemctl status k3s
+```
+
+### 8.4 Vérification de l'installation
+
+```bash
+sudo k3s --version
+```
+
+Récupérer le token d'authentification du serveur :
+
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
+Ce token permet à l'agent de rejoindre le cluster. Il doit rester privé et ne doit pas être publié dans le dépôt Git.
+
+## 9. Installation de K3s Agent
+
+Le worker est configuré sur :
+
+```text
+khmessahSW
+192.168.56.111
+```
+
+### 9.1 Configuration de l'adresse IP du worker
+
+Sur le worker :
+
+```bash
+sudo mkdir -p /etc/rancher/k3s
+sudo nano /etc/rancher/k3s/config.yaml
+```
+
+Contenu :
+
+```yaml
+node-ip: 192.168.56.111
+```
+
+### 9.2 Installation de l'agent
+
+Sur le worker, définir les informations de connexion au serveur :
+
+```bash
+export K3S_URL="https://192.168.56.110:6443"
+export K3S_TOKEN="<TOKEN_DU_SERVEUR>"
+```
+
+Puis lancer l'installation :
+
+```bash
+curl -sfL https://get.k3s.io | sh -
+```
+
+Remplacer `<TOKEN_DU_SERVEUR>` par le token récupéré sur le serveur.
+
+### 9.3 Vérification du service Agent
+
+```bash
+sudo systemctl status k3s-agent
+```
+
+## 10. Installation et utilisation de kubectl
+
+K3s intègre kubectl dans sa commande `k3s kubectl`.
+
+Pour utiliser directement `kubectl` sur le serveur :
+
+```bash
+sudo ln -s /usr/local/bin/k3s /usr/local/bin/kubectl
+```
+
+Vérifier la version :
+
+```bash
+kubectl version --client
+```
+
+Si la commande nécessite les droits root pour accéder à la configuration du cluster :
+
+```bash
+sudo kubectl get nodes
+```
+
+## 11. Vérification du cluster Kubernetes
+
+Depuis le serveur :
+
+### 11.1 Vérifier les nœuds
+
+```bash
+sudo kubectl get nodes -o wide
+```
+
+Résultat attendu :
+
+```text
+NAME          STATUS   ROLES
+khmessahs     Ready    control-plane
+khmessahsw    Ready    <none>
+```
+
+Les deux nœuds doivent être à l'état `Ready`.
+
+### 11.2 Vérifier les composants système
+
+```bash
+sudo kubectl get pods -A
+```
+
+Les composants observés lors de la vérification comprennent :
+
+- CoreDNS
+- Local Path Provisioner
+- Metrics Server
+- Traefik
+- Service LoadBalancer de Traefik
+
+Les pods système ont été vérifiés à l'état `Running`, et les jobs d'installation concernés à l'état `Completed`.
+
+### 11.3 Vérifier les services
+
+```bash
+sudo kubectl get services -A
+```
+
+### 11.4 Vérifier les informations du cluster
+
+```bash
+sudo kubectl cluster-info
+```
+
+## 12. Problèmes rencontrés et solutions
+
+### Problème 1 : mauvaise adresse IP utilisée par K3s
+
+**Problème :**
+
+K3s utilisait l'adresse NAT de la machine virtuelle :
+
+```text
+10.0.2.15
+```
+
+Au lieu de l'adresse privée attendue :
+
+```text
+192.168.56.110
+```
+
+**Solution :**
+
+Configuration de l'adresse IP dans :
+
+```text
+/etc/rancher/k3s/config.yaml
+```
+
+Puis redémarrage du service :
+
+```bash
+sudo systemctl restart k3s
+```
+
+### Problème 2 : communication avec l'API Kubernetes
+
+Des délais d'attente ont été rencontrés lors de certaines requêtes à l'API Kubernetes.
+
+Le service K3s a été redémarré, puis les vérifications des nœuds et des pods ont été effectuées.
+
+Commandes de diagnostic :
+
+```bash
+sudo systemctl status k3s
+sudo journalctl -u k3s -n 100 --no-pager
+sudo kubectl get nodes
+```
+
+## 13. Commandes utiles pour la gestion des VMs
+
+Depuis le répertoire `p1` :
+
+| Commande                 | Description             |
+| ------------------------ | ----------------------- |
+| `vagrant up`             | Démarrer les VMs        |
+| `vagrant status`         | Afficher leur état      |
+| `vagrant halt`           | Arrêter les VMs         |
+| `vagrant reload`         | Redémarrer les VMs      |
+| `vagrant ssh khmessahS`  | Se connecter au serveur |
+| `vagrant ssh khmessahSW` | Se connecter au worker  |
+| `vagrant suspend`        | Suspendre les VMs       |
+| `vagrant resume`         | Reprendre les VMs       |
+
+Attention : `vagrant destroy` supprime les machines virtuelles et peut entraîner la perte de leurs données.
+
+## 14. Résultat de la partie 1
+
+La partie 1 a permis de réaliser les opérations suivantes :
+
+- [x] Création de deux machines virtuelles avec Vagrant.
+- [x] Configuration des ressources CPU et RAM.
+- [x] Attribution des adresses IP privées.
+- [x] Configuration des hostnames.
+- [x] Test de communication réseau.
+- [x] Configuration SSH sans mot de passe.
+- [x] Installation de K3s Server.
+- [x] Installation de K3s Agent.
+- [x] Configuration des adresses IP des nœuds K3s.
+- [x] Vérification de l'installation de kubectl.
+- [x] Vérification des deux nœuds Kubernetes.
+- [x] Vérification des pods système.
+- [x] Vérification finale de la conformité de la distribution Debian avec la consigne.
+
+## 15. Conclusion
+
+La première partie du projet Inception of Things a permis de mettre en place un environnement virtualisé avec deux machines Debian et un cluster Kubernetes léger basé sur K3s.
+
+Le serveur et le worker communiquent via leurs adresses IP privées, et les deux nœuds ont été observés à l'état `Ready`.
+
+Cette infrastructure constitue la base pour les parties suivantes du projet.
