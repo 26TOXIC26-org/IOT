@@ -1,0 +1,23 @@
+Vagrant.configure"2"do|config|
+  config.vm.define "mmondads" do |server|
+    server.vm.box = "bento/centos-7"
+    server.vm.hostname = "mmondads"
+    server.vm.network "private_network", ip: "192.168.56.110"
+    server.vm.provider "virtualbox" do |v|
+      v.name = "mmondads"
+      v.memory = 1024
+      v.cpus = 1
+    end
+  end
+
+  config.vm.define "mmondadsw" do |worker|
+    worker.vm.box = "bento/centos-7"
+    worker.vm.hostname = "mmondadsw"
+    worker.vm.network "private_network", ip: "192.168.56.111"
+    worker.vm.provider "virtualbox" do |v|
+      v.name = "mmondadsw"
+      v.memory = 1024
+      v.cpus = 1
+    end
+  end
+end
