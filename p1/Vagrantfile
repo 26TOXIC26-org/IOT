@@ -7,7 +7,7 @@
 # you're doing.
 Vagrant.configure("2") do |config|
 
-  config.vm.box = "debian/testing64"
+  config.vm.box = "bento/debian-13"
 
   config.vm.define "khmessahS" do |server|
     server.vm.hostname = "khmessahS"
@@ -18,6 +18,7 @@ Vagrant.configure("2") do |config|
       vb.memory = "1024"
       vb.cpus = 1
     end
+    server.vm.provision "shell", path: "scripts/server.sh"
   end
 
   config.vm.define "khmessahSW" do |worker|
@@ -29,6 +30,7 @@ Vagrant.configure("2") do |config|
       vb.memory = "1024"
       vb.cpus = 1
     end
+    worker.vm.provision "shell", path: "scripts/worker.sh"
   end
 
 end

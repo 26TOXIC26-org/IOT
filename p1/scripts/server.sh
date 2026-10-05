@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+echo "=== Updating packages ==="
+apt-get update
+
+echo "=== Installing dependencies ==="
+apt-get install -y curl
+
+echo "=== Installing K3s Server ==="
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --node-ip=192.168.56.110" sh -
+
+echo "=== K3s Server installed ==="
+
+echo "=== Configuring kubectl permissions ==="
+chmod 644 /etc/rancher/k3s/k3s.yaml
+
+echo "=== Waiting for K3s node ==="
+until kubectl get nodes >/dev/null 2>&1; do
+    sleep 2
+done
+
+echo "=== K3s node is ready ==="
+kubectl get nodes
+
+echo "=== K3s token ==="
+cat /var/lib/rancher/k3s/server/node-token > /vagrant/k3s-token
+
+echo "=== K3s service status ==="
+systemctl status k3s --no-pager
