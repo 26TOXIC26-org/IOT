@@ -17,6 +17,7 @@ echo "=== Waiting for K3s node ==="
 until kubectl get nodes >/dev/null 2>&1; do
     sleep 2
 done
-
+echo "=== Configuring kubectl alias ==="
+grep -qxF 'alias k=kubectl' /home/vagrant/.bashrc || echo 'alias k=kubectl' >> /home/vagrant/.bashrc
 echo "=== K3s node is ready ==="
 echo "=== K3s Server installed ==="
