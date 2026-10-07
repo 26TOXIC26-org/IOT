@@ -21,3 +21,21 @@ echo "=== Configuring kubectl alias ==="
 grep -qxF 'alias k=kubectl' /home/vagrant/.bashrc || echo 'alias k=kubectl' >> /home/vagrant/.bashrc
 echo "=== K3s node is ready ==="
 echo "=== K3s Server installed ==="
+
+echo "=== start Deployments + Services ==="
+kubectl apply -f /vagrant/confs/apps
+
+echo "===start ingress ==="
+kubectl apply -f /vagrant/confs/ingress.yaml
+
+echo "=== Checking cluster ==="
+kubectl get nodes
+
+echo "=== Checking applications ==="
+kubectl get pods
+
+echo "=== Checking services ==="
+kubectl get services
+
+echo "=== Checking ingress ==="
+kubectl get ingress
