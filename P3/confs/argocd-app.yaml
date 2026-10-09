@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: playground
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/26TOXIC26/iot-gitops-amousaid
+    targetRevision: HEAD
+    path: p3/manifests
+  destination: # destination infos
+    server: https://kubernetes.default.svc # destination server (in this case local machine)
+    namespace: dev # destination namespace
+  syncPolicy: # how argocd will try sync git state with live state
+    automated: # automation options
+      prune: true # if source conf file removed from git, argocd will remove destination namespace
+      selfHeal: true # if conf changed manuelment, argocd will reset it from git
+    syncOptions: # more sync options
+      - CreateNamespace=true # if destination namespace doesn't exist argocd will create new one

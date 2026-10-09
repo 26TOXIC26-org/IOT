@@ -1,0 +1,32 @@
+apiVersion: apps/v1 # Use the apps/v1 Kubernetes API
+kind: Deployment # Create a Deployment object
+metadata: # Define metadata for the Deployment
+  name: wil-playground # Set the Deployment name
+  namespace: dev # Put the Deployment in the dev namespace
+spec: # Define the desired state of the Deployment
+  replicas: 1 # Run one Pod replica
+  selector: # Define which Pods belong to this Deployment
+    matchLabels: # Match Pods using their labels
+      app: playground # Match Pods with the app=playground label
+  template: # Define the template for created Pods
+    metadata: # Define metadata for the Pods
+      labels: # Define labels for the Pods
+        app: playground # Give created Pods the app=playground label
+    spec: # Define the desired Pod configuration
+      containers: # Define the containers inside the Pod
+        - name: playground # Set the container name
+          image: wil42/playground:v1 # Use the v1 Docker image
+          ports: # Define the ports used by the container
+            - containerPort: 8888 # The application listens on port 8888
+--- # Start a new Kubernetes object
+apiVersion: v1 # Use the core Kubernetes API V1 (if group part is empty that's mean core group)
+kind: Service # Create a Service object
+metadata: # Define metadata for the Service
+  name: playground-svc # Set the Service name
+  namespace: dev # Put the Service in the dev namespace
+spec: # Define the desired state of the Service
+  selector: # Define which Pods receive traffic
+    app: playground # Select Pods with the app=playground label
+  ports: # Define the Service ports
+    - port: 8888 # Expose the Service on port 8888
+      targetPort: 8888 # Forward traffic to port 8888 on the Pods
