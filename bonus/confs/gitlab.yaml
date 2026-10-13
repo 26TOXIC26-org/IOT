@@ -1,0 +1,148 @@
+apiVersion: v1 # core API group (the group part is empty, so only "v1")
+kind: Namespace # the dedicated namespace required by the subject
+metadata:
+  name: gitlab
+---
+apiVersion: v1
+kind: Service # stable in-cluster address for GitLab: gitlab.gitlab.svc.cluster.local:80
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  type: ClusterIP # only reachable inside the cluster (Traefik and Argo CD use it)
+  selector:
+    app: gitlab # send traffic to Pods that carry this label
+  ports:
+    - name: http
+      port: 80 # port of the Service
+      targetPort: http # container port named "http" (80)
+---
+apiVersion: apps/v1
+kind: StatefulSet # one Pod with a stable name (gitlab-0) and its own persistent volume
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  serviceName: gitlab # governing Service name (required field for a StatefulSet)
+  replicas: 1 # GitLab Omnibus is a single-node, all-in-one install: never more than 1
+  selector:
+    matchLabels:
+      app: gitlab
+  template:
+    metadata:
+      labels:
+        app: gitlab
+    spec:
+      terminationGracePeriodSeconds: 120 # let "gitlab-ctl stop" shut PostgreSQL down cleanly
+      containers:
+        - name: gitlab
+          image: gitlab/gitlab-ce:latest # official Omnibus image (CE), latest release from Docker Hub
+          imagePullPolicy: IfNotPresent # do not re-check Docker Hub on every restart
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: GITLAB_ROOT_PASSWORD # created by setup.sh, never stored in Git
+              valueFrom:
+                secretKeyRef:
+                  name: gitlab-root-password
+                  key: password
+            - name: GITLAB_OMNIBUS_CONFIG # Ruby code evaluated like /etc/gitlab/gitlab.rb on every start
+              value: |
+                external_url 'http://gitlab.local:8080'
+                gitlab_rails['nginx']['listen_port'] = 80
+                gitlab_rails['initial_root_password'] = ENV['GITLAB_ROOT_PASSWORD']
+
+                puma['worker_processes'] = 0
+                sidekiq['concurrency'] = 10
+                postgresql['shared_buffers'] = '256MB'
+                gitaly['configuration'] = {
+                  concurrency: [
+                    { 'rpc' => '/gitaly.SmartHTTPService/PostReceivePack', 'max_per_repo' => 3 },
+                    { 'rpc' => '/gitaly.SSHService/SSHUploadPack', 'max_per_repo' => 3 },
+                  ],
+                }
+                gitaly['env'] = {
+                  'GITALY_COMMAND_SPAWN_MAX_PARALLEL' => '2',
+                  'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000'
+                }
+                gitlab_rails['env'] = { 'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000' }
+
+                alertmanager['enable'] = false
+                gitlab_exporter['enable'] = false
+                gitlab_kas['enable'] = false
+                node_exporter['enable'] = false
+                postgres_exporter['enable'] = false
+                prometheus_monitoring['enable'] = false
+                prometheus['enable'] = false
+                puma['exporter_enabled'] = false
+                redis_exporter['enable'] = false
+                sidekiq['metrics_enabled'] = false
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2560Mi # about what a tuned GitLab needs once it is running
+            limits:
+              memory: 6Gi # safety net: GitLab peaks during the first boot (migrations)
+          startupProbe: # first boot = reconfigure + DB migrations: be patient (180 x 10s = 30 min)
+            exec:
+              command: ["/opt/gitlab/embedded/bin/curl", "--fail", "--silent", "--max-time", "10", "--output", "/dev/null", "http://localhost/-/readiness?all=1"]
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 180
+          readinessProbe: # GitLab's own readiness endpoint (database, Redis and Gitaly reachable); localhost is allowed by default
+            exec:
+              command: ["/opt/gitlab/embedded/bin/curl", "--fail", "--silent", "--max-time", "10", "--output", "/dev/null", "http://localhost/-/readiness?all=1"]
+            periodSeconds: 15
+            timeoutSeconds: 15
+            failureThreshold: 6
+          livenessProbe: # restart the container only if the web application itself is dead or deadlocked
+            exec:
+              command: ["/opt/gitlab/embedded/bin/curl", "--fail", "--silent", "--max-time", "10", "--output", "/dev/null", "http://localhost/-/liveness"]
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 10
+          volumeMounts: # the three directories the image declares as VOLUME
+            - name: data
+              mountPath: /etc/gitlab # gitlab.rb, gitlab-secrets.json, ssh host keys
+              subPath: config
+            - name: data
+              mountPath: /var/opt/gitlab # repositories, PostgreSQL, Redis, uploads
+              subPath: data
+            - name: data
+              mountPath: /var/log/gitlab # logs
+              subPath: logs
+            - name: dshm
+              mountPath: /dev/shm # default 64Mi is too small for PostgreSQL
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+  volumeClaimTemplates: # one PVC per Pod (named data-gitlab-0), served by the local-path provisioner of K3s
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress # HTTP route: Host "gitlab.local" -> Service gitlab:80 (executed by Traefik)
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  ingressClassName: traefik # k3s ships Traefik and an IngressClass with this name
+  rules:
+    - host: gitlab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitlab
+                port:
+                  number: 80
