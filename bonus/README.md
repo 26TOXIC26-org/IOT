@@ -120,7 +120,7 @@ bonus/
 | 1 | `apt-get install` Docker (`docker.io`, only if `docker` is missing), `curl`, `git`, `jq`, `openssl` | k3d needs Docker; `jq`/`openssl` are used by `bootstrap.sh`, `git` by the demo. |
 | 2 | Install `kubectl` (latest stable) in a temp dir | Nothing is left in the current directory. |
 | 3 | Install k3d (official installer) | |
-| 4 | `k3d cluster create iotcluster --servers 1 --agents 1 --port "8080:80@loadbalancer"` (or `k3d cluster start` if it exists); kubeconfig for root and for `$SUDO_USER` | **Same cluster as Part 3.** Host port 8080 now carries GitLab's web UI. |
+| 4 | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer"` (or `k3d cluster start` if it exists); kubeconfig for root and for `$SUDO_USER` | **Same cluster as Part 3.** Host port 8080 now carries GitLab's web UI. |
 | 5 | Namespaces `argocd`, `dev`, `gitlab` | `gitlab` is the dedicated namespace the subject asks for. |
 | 6 | Secret `gitlab-root-password` (random) + `kubectl apply -f confs/gitlab.yaml` | Before Argo CD, so GitLab's image pull overlaps with the Argo CD install. The password never goes to Git. |
 | 7 | Install Argo CD (`stable` manifest, server-side apply) and wait for it | Same as Part 3. |

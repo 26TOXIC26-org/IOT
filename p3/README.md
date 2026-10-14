@@ -73,7 +73,7 @@ curl http://localhost:8888/            # {"status":"ok", "message": "v1"}   (or 
  │                                       │  8888 -> 8888  (ClusterIP)    │  │
  │                                       │  (5) routes to Pod by label   │  │
  │                                       └───────────────▲───────────────┘  │
- │ (Docker on one VM: 1 server + 1 agent)                │                  │
+ │ (Docker on one VM: 1 server node)                     │                  │
  └───────────────────────────────────────────────────────┼──────────────────┘
                                                          │
                                                          │
@@ -147,7 +147,7 @@ The script starts with `set -euo pipefail`: it stops at the first error, on any 
 | 1 | Install Docker | `apt-get install -y docker.io ca-certificates curl`, `systemctl enable --now docker` | k3d runs every Kubernetes node as a Docker container, so Docker is the one hard dependency. |
 | 2 | Install `kubectl` (skipped if present) | download latest stable from `dl.k8s.io`, `install -m 0755` into `/usr/local/bin` | The command-line client for the cluster. |
 | 3 | Install k3d | official `install.sh` piped to `bash` | Installs the latest k3d release. |
-| 4 | Create the cluster | `k3d cluster create iotcluster --servers 1 --agents 1 --port "8080:80@loadbalancer"` | See the flag table below. |
+| 4 | Create the cluster | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer"` | See the flag table below. |
 | 5 | Give your user access | `k3d kubeconfig get iotcluster > ~/.kube/config` for `$SUDO_USER` | So `kubectl` works without `sudo`. **Overwrites** that file. Skipped when run as plain root. |
 | 6 | Create namespaces | `kubectl create namespace argocd`, `kubectl create namespace dev` | One for Argo CD, one for the app (subject requirement). |
 | 7 | Install Argo CD | `kubectl apply -n argocd --server-side --force-conflicts -f …/argo-cd/stable/manifests/install.yaml` | Official install manifest. Server-side apply is needed because some Argo CD CRDs (notably ApplicationSet) are too large for client-side apply's `last-applied` annotation (262 144-byte limit). |
@@ -160,12 +160,12 @@ The path to `confs/` is resolved relative to the script, so it can be started fr
 
 | Flag | Meaning |
 |------|---------|
-| `iotcluster` | Cluster name. k3d names the node containers `k3d-iotcluster-server-0`, `k3d-iotcluster-agent-0` and `k3d-iotcluster-serverlb`. |
-| `--servers 1` | One K3s *server* node: the control plane (API server, scheduler, controller manager, datastore). |
-| `--agents 1` | One K3s *agent* node: a worker where Pods run. |
+| `iotcluster` | Cluster name. k3d names its containers `k3d-iotcluster-server-0` (the node) and `k3d-iotcluster-serverlb` (the load balancer). |
+| `--servers 1` | One K3s *server* node: the control plane (API server, scheduler, controller manager, datastore). A K3s server also runs the kubelet and is not tainted, so Pods are scheduled on it too. |
+| `--agents 0` | No separate *agent* (worker) node: one node is enough for Argo CD and the app. This is also k3d's default; the flag is written out to show the choice. |
 | `--port "8080:80@loadbalancer"` | Publish host port 8080 on port 80 of k3d's load-balancer container. It exists for a future Ingress and is **not used by the app today** (the app is reached with `port-forward`). |
 
-**What you have afterwards:** `kubectl get nodes` shows two nodes; `docker ps` shows the three `k3d-iotcluster-*` containers; and Argo CD runs in `argocd`:
+**What you have afterwards:** `kubectl get nodes` shows one node (`control-plane`, which also runs Pods); `docker ps` shows the two `k3d-iotcluster-*` containers; and Argo CD runs in `argocd`:
 
 | Pod (namespace `argocd`) | Role |
 |--------------------------|------|

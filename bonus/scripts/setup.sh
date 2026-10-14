@@ -69,7 +69,7 @@ if k3d cluster list -o json | jq -e --arg n "$CLUSTER_NAME" '.[] | select(.name 
 else
     k3d cluster create "$CLUSTER_NAME" \
       --servers 1 \
-      --agents 1 \
+      --agents 0 \
       --port "8080:80@loadbalancer"
 fi
 k3d kubeconfig merge "$CLUSTER_NAME" --kubeconfig-merge-default --kubeconfig-switch-context >/dev/null # kubectl of root talks to this cluster
