@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: playground
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://gitlab.gitlab.svc.cluster.local/root/iot-gitops-amousaid.git # local GitLab, in-cluster address of its Service
+    targetRevision: HEAD
+    path: manifests # folder of the GitLab repo that holds deployment.yaml
+  destination: # destination infos
+    server: https://kubernetes.default.svc # destination server (in this case the same cluster)
+    namespace: dev # destination namespace
+  syncPolicy: # how argocd will try sync git state with live state
+    automated: # automation options
+      prune: true # if a resource is removed from git, argocd deletes it from the cluster
+      selfHeal: true # if the live state is changed by hand, argocd resets it from git
+    syncOptions: # more sync options
+      - CreateNamespace=true # if destination namespace doesn't exist argocd will create it

@@ -1,2 +1,4 @@
 .vagrant/
 k3s-token
+/K8S*
+K8S*
