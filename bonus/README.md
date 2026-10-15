@@ -38,7 +38,7 @@ When it ends:
 |------|-----------------|-------|
 | GitLab | <http://gitlab.local:8080> | `root` / `kubectl get secret gitlab-root-password -n gitlab -o jsonpath='{.data.password}' \| base64 -d; echo` |
 | Argo CD | `kubectl port-forward svc/argocd-server -n argocd 8081:443` → <https://localhost:8081> | `admin` / `kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' \| base64 -d; echo` |
-| The app | `kubectl port-forward svc/playground-svc -n dev 8888:8888` → `curl http://localhost:8888/` | — |
+| The app | `curl http://localhost:8888/` (host port 8888 is published by the k3d load balancer for the `LoadBalancer` Service: no `port-forward`) | — |
 
 `gitlab.local` works because `setup.sh` adds `127.0.0.1 gitlab.local` to the VM's `/etc/hosts`. Open GitLab with a browser **inside the VM**. `http://localhost:8080` answers `404`: Traefik routes by host name.
 
@@ -105,7 +105,7 @@ bonus/
 - **RAM:** 8 GB recommended. The GitLab Pod requests 2.5 GiB and uses about 3 GiB once started; the whole lab (GitLab + Argo CD + K3s) about 4.5 GiB. Add swap on a smaller VM.
 - **CPU / disk:** 2 vCPUs minimum (4 is faster), 25 GB free disk (the GitLab image is 1.5 GB compressed).
 - **Root:** run through `sudo` (packages, `/usr/local/bin`, `/etc/hosts`).
-- **Free host ports:** `8080` (GitLab, through the k3d load balancer), `8081` (Argo CD UI port-forward), `8888` (app port-forward).
+- **Free host ports:** `8080` (GitLab) and `8888` (the app), both through the k3d load balancer, so the cluster cannot be created if one of them is taken; `8081` (Argo CD UI port-forward).
 - **Internet:** apt repositories, `dl.k8s.io`, `raw.githubusercontent.com`, Docker Hub (`gitlab/gitlab-ce`, `wil42/playground`, `rancher/k3s`), `quay.io` and `ghcr.io` (Argo CD, k3d).
 - **Part 3 cluster:** not needed, but no problem if it exists. `setup.sh` reuses `iotcluster` and points the existing `playground` Application to GitLab.
 
@@ -120,7 +120,7 @@ bonus/
 | 1 | `apt-get install` Docker (`docker.io`, only if `docker` is missing), `curl`, `git`, `jq`, `openssl` | k3d needs Docker; `jq`/`openssl` are used by `bootstrap.sh`, `git` by the demo. |
 | 2 | Install `kubectl` (latest stable) in a temp dir | Nothing is left in the current directory. |
 | 3 | Install k3d (official installer) | |
-| 4 | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer"` (or `k3d cluster start` if it exists); kubeconfig for root and for `$SUDO_USER` | **Same cluster as Part 3.** Host port 8080 now carries GitLab's web UI. |
+| 4 | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer" --port "8888:8888@loadbalancer"` (or `k3d cluster start` if it exists, plus `k3d cluster edit --port-add "8888:8888@loadbalancer"` when it does not publish 8888 yet); kubeconfig for root and for `$SUDO_USER` | **Same cluster as Part 3.** Host port 8080 now carries GitLab's web UI; host port 8888 carries the app. |
 | 5 | Namespaces `argocd`, `dev`, `gitlab` | `gitlab` is the dedicated namespace the subject asks for. |
 | 6 | Secret `gitlab-root-password` (random) + `kubectl apply -f confs/gitlab.yaml` | Before Argo CD, so GitLab's image pull overlaps with the Argo CD install. The password never goes to Git. |
 | 7 | Install Argo CD (`stable` manifest, server-side apply) and wait for it | Same as Part 3. |
@@ -179,8 +179,7 @@ What the evaluator asks for: Part 3's demo, with GitLab as the Git server.
 **1. The app answers v1**
 
 ```bash
-kubectl port-forward svc/playground-svc 8888:8888 -n dev      # terminal 1, leave it running
-curl http://localhost:8888/                                    # terminal 2: {"status":"ok", "message": "v1"}
+curl http://localhost:8888/                                    # {"status":"ok", "message": "v1"}
 ```
 
 **2. Change the tag in GitLab** — either way works:
@@ -203,7 +202,7 @@ kubectl get pods -n dev -w                                     # the v2 Pod star
 kubectl get application -n argocd                              # playground   Synced   Healthy
 ```
 
-**4. The app answers v2.** Restart the `port-forward` (the old one was bound to the deleted v1 Pod: `lost connection to pod`), then `curl http://localhost:8888/` → `{"status":"ok", "message": "v2"}`.
+**4. The app answers v2.** Same command, nothing to restart: `curl http://localhost:8888/` → `{"status":"ok", "message": "v2"}`.
 
 **5. Back to v1** for the next demo: same edit with the tags swapped, or `bash scripts/bootstrap.sh`.
 
@@ -262,7 +261,7 @@ sudo bash scripts/setup.sh                                             # rebuild
 - **HTTP only.** No TLS between you and GitLab, nor between Argo CD and GitLab (that traffic never leaves the cluster). Fine for a local lab.
 - **`latest` moves.** GitLab ships a release every month; a new cluster gets the newest image. To freeze a version, replace `latest` with a tag such as `19.4.2-ce.0` in `confs/gitlab.yaml`. Upgrading an existing instance across several minor versions can require GitLab's upgrade stops.
 - **Secrets are only base64.** The root password and the tokens live in Kubernetes Secrets (`gitlab-root-password`, `gitlab-bootstrap-token` in `gitlab`, `gitlab-repo` in `argocd`). Delete the cluster (or revoke the tokens in GitLab) after the defense.
-- **Overwrites `~/.kube/config`** of the user who ran `sudo`, like Part 3.
+- **Switches your current `kubectl` context** to `k3d-iotcluster`, like Part 3. The user's `~/.kube/config` is merged (other clusters stay), not overwritten.
 - **Debian/Ubuntu on amd64 only.** Nothing is version-pinned: `kubectl` latest stable, k3d latest, Argo CD `stable`, GitLab `latest`.
 - **Polling, not webhooks.** Argo CD notices a commit within about 3 minutes unless you trigger a refresh.
 - **GitLab is only a Git server here.** No GitLab CI/runners: Argo CD is the CD part.

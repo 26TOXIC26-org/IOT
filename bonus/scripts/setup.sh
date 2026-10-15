@@ -60,17 +60,22 @@ else
 fi
 
 # --------------------------------------------------
-# 4. Cluster (same flags as Part 3: host port 8080 -> k3d load balancer port 80 -> Traefik)
+# 4. Cluster (same flags as Part 3: host port 8080 -> k3d load balancer port 80 -> Traefik, host port 8888 -> the app)
 # --------------------------------------------------
 log "[4/9] k3d cluster $CLUSTER_NAME"
-if k3d cluster list -o json | jq -e --arg n "$CLUSTER_NAME" '.[] | select(.name == $n)' >/dev/null; then
+if k3d cluster list "$CLUSTER_NAME" >/dev/null 2>&1; then
     echo "[SKIP] cluster $CLUSTER_NAME already exists"
     k3d cluster start "$CLUSTER_NAME" # wakes it up after a reboot of the VM, nothing to do when it already runs
+    if ! docker port "k3d-${CLUSTER_NAME}-serverlb" 8888/tcp >/dev/null 2>&1; then
+        echo "[CONFIG] cluster was created without host port 8888: publishing it now"
+        k3d cluster edit "$CLUSTER_NAME" --port-add "8888:8888@loadbalancer" # only the load balancer container is recreated
+    fi
 else
     k3d cluster create "$CLUSTER_NAME" \
       --servers 1 \
       --agents 0 \
-      --port "8080:80@loadbalancer"
+      --port "8080:80@loadbalancer" \
+      --port "8888:8888@loadbalancer"
 fi
 k3d kubeconfig merge "$CLUSTER_NAME" --kubeconfig-merge-default --kubeconfig-switch-context >/dev/null # kubectl of root talks to this cluster
 
@@ -85,9 +90,10 @@ if [ "$REAL_USER" != "root" ]; then
 
     mkdir -p "$REAL_HOME/.kube"
 
-    k3d kubeconfig get "$CLUSTER_NAME" > "$REAL_HOME/.kube/config"
+    # merge, never overwrite: the other clusters of that user stay in the file
+    k3d kubeconfig merge "$CLUSTER_NAME" --output "$REAL_HOME/.kube/config" --kubeconfig-switch-context >/dev/null
 
-    chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.kube/config"
+    chown -R "$REAL_USER:" "$REAL_HOME/.kube" # mkdir and k3d ran as root: the user must own the folder, not only the file
     chmod 600 "$REAL_HOME/.kube/config"
 
     echo "[OK] kubeconfig configured at $REAL_HOME/.kube/config"
@@ -160,4 +166,4 @@ echo "GitLab    : http://${GITLAB_HOST}:8080   (user: root)"
 echo "Password  : kubectl get secret gitlab-root-password -n gitlab -o jsonpath='{.data.password}' | base64 -d; echo"
 echo "Argo CD   : kubectl port-forward svc/argocd-server -n argocd 8081:443   ->  https://localhost:8081   (user: admin)"
 echo "Password  : kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d; echo"
-echo "The app   : kubectl port-forward svc/playground-svc -n dev 8888:8888    ->  curl http://localhost:8888/"
+echo "The app   : curl http://localhost:8888/   (published by the k3d load balancer, no port-forward needed)"

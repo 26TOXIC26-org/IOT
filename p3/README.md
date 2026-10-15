@@ -6,19 +6,29 @@ Who this is for: teammates who must run, explain and defend Part 3.
 
 ## Contents
 
-- [Quick start](#quick-start)
-- [How it works](#how-it-works)
-- [What is where](#what-is-where)
-- [Prerequisites](#prerequisites)
-- [What `setup.sh` does](#what-setupsh-does)
-- [The config files, value by value](#the-config-files-value-by-value)
-- [Using the lab](#using-the-lab)
-- [Defense checklist](#defense-checklist)
-- [K3s vs K3d](#k3s-vs-k3d)
-- [Troubleshooting](#troubleshooting)
-- [Reset and cleanup](#reset-and-cleanup)
-- [Known limitations](#known-limitations)
-- [References](#references)
+- [Part 3 — K3d + Argo CD (GitOps)](#part-3--k3d--argo-cd-gitops)
+  - [Contents](#contents)
+  - [Quick start](#quick-start)
+  - [How it works](#how-it-works)
+  - [What is where](#what-is-where)
+    - [Which version is deployed?](#which-version-is-deployed)
+  - [Prerequisites](#prerequisites)
+  - [What `setup.sh` does](#what-setupsh-does)
+  - [The config files, value by value](#the-config-files-value-by-value)
+    - [`confs/argocd-app.yaml` — the Argo CD Application](#confsargocd-appyaml--the-argo-cd-application)
+    - [`manifests/deployment.yaml` — what gets deployed](#manifestsdeploymentyaml--what-gets-deployed)
+  - [Using the lab](#using-the-lab)
+    - [Check the state](#check-the-state)
+    - [Open the Argo CD UI](#open-the-argo-cd-ui)
+    - [Reach the app](#reach-the-app)
+    - [Demo: change the version through Git](#demo-change-the-version-through-git)
+    - [Optional: watch self-heal work](#optional-watch-self-heal-work)
+  - [Defense checklist](#defense-checklist)
+  - [K3s vs K3d](#k3s-vs-k3d)
+  - [Troubleshooting](#troubleshooting)
+  - [Reset and cleanup](#reset-and-cleanup)
+  - [Known limitations](#known-limitations)
+  - [References](#references)
 
 ## Quick start
 
@@ -30,20 +40,14 @@ sudo bash scripts/setup.sh             # installs Docker, kubectl, k3d; builds t
 kubectl get ns                         # argocd and dev exist
 kubectl get app -n argocd              # playground   Synced   Healthy
 kubectl get pods -n dev                # wil-playground-<hash>   1/1   Running
-```
-
-Then, to talk to the app (the Service is only reachable inside the cluster, so tunnel to it):
-
-```bash
-# terminal 1 — keep it running
-kubectl port-forward svc/playground-svc 8888:8888 -n dev
-
-# terminal 2
 curl http://localhost:8888/            # {"status":"ok", "message": "v1"}   (or "v2")
 ```
 
+The app answers on host port **8888** directly: its Service is `type: LoadBalancer` and the cluster publishes that port (`--port "8888:8888@loadbalancer"`). No `kubectl port-forward` is needed, and the same `curl` keeps working after the v1 → v2 update.
+
 - Use `bash scripts/setup.sh` — the file is not marked executable.
-- The first Argo CD sync runs in the background after the script ends. Give it a minute or two (image pulls dominate).
+- Safe to re-run: an existing `iotcluster` is started (not recreated) and existing namespaces are left alone, so the script also brings the lab back after a reboot of the VM.
+- The first Argo CD sync runs in the background after the script ends. Give it a minute or two (image pulls dominate): `curl` answers once the Pod is `Running`.
 - The version you get is the tag in the **GitOps repo**, not the copy in this folder. See [Which version is deployed?](#which-version-is-deployed).
 
 ## How it works
@@ -70,15 +74,15 @@ curl http://localhost:8888/            # {"status":"ok", "message": "v1"}   (or 
  │  │                         │          │      (3) scheduled to a node  │  │
  │  │ watches Git, syncs      │          │                               │  │
  │  └─────────────────────────┘          │ Service playground-svc        │  │
- │                                       │  8888 -> 8888  (ClusterIP)    │  │
+ │                                       │  8888 -> 8888  (LoadBalancer) │  │
  │                                       │  (5) routes to Pod by label   │  │
  │                                       └───────────────▲───────────────┘  │
  │ (Docker on one VM: 1 server node)                     │                  │
  └───────────────────────────────────────────────────────┼──────────────────┘
                                                          │
                                                          │
-                                        you: kubectl port-forward 8888:8888
-                                            curl http://localhost:8888/
+                                        you: curl http://localhost:8888/
+                                        (host 8888 -> k3d load balancer -> node -> Pod)
 ```
 
 | Step | What happens | Done by | See it with |
@@ -112,13 +116,11 @@ Contents of this folder:
 ├── README.md            ← you are here
 ├── scripts/
 │   └── setup.sh         ← installs the tools and bootstraps the whole lab (run as root)
-├── confs/
-│   └── argocd-app.yaml  ← the Argo CD "Application": what to deploy, from where, to where
-└── manifests/
-    └── deployment.yaml  ← reference copy of the app manifests (Deployment + Service)
+└── confs/
+    └── argocd-app.yaml  ← the Argo CD "Application": what to deploy, from where, to where
 ```
 
-> **Argo CD does not read `manifests/` in this repo.** It reads `p3/manifests/` in the GitOps repo (lowercase `p3`, the path is case-sensitive). The copy here is documentation and can drift from the real one.
+> **The app manifests are not in this folder.** Argo CD reads `p3/manifests/deployment.yaml` from the GitOps repo (lowercase `p3`, the path is case-sensitive). This repo only holds the script and the `Application` that points to it.
 
 ### Which version is deployed?
 
@@ -132,29 +134,29 @@ Argo CD deploys whatever tag this prints. A fresh `setup.sh` run deploys the tag
 
 ## Prerequisites
 
-- **OS:** Debian or Ubuntu (the script uses `apt-get` and `systemctl`) on **amd64** (the `kubectl` download is `linux/amd64`).
+- **OS:** Debian or Ubuntu (the script uses `apt-get`, `dpkg` and `systemctl`) on **amd64** (`wil42/playground` is only published for amd64).
 - **Root:** run through `sudo` (installs packages, writes to `/usr/local/bin`, manages the Docker service).
 - **Internet:** apt repositories, `dl.k8s.io`, `raw.githubusercontent.com` (k3d installer and Argo CD manifests), Docker Hub, the registries Argo CD's images come from (for example `quay.io`, `ghcr.io`), and `github.com` (Argo CD clones the GitOps repo).
-- **Free host ports:** `8080` (published by the k3d load balancer, so the cluster cannot be created if it is taken) and `8888` (used by the `port-forward` below).
+- **Free host ports:** `8080` (Ingress, unused today) and `8888` (the app). Both are published by the k3d load balancer, so the cluster cannot be created if one of them is taken. `8081` is only used by the Argo CD UI `port-forward`.
 - **Size (rule of thumb, not a requirement):** about 2 vCPUs and 4 GB of RAM is comfortable for k3d + Argo CD.
 
 ## What `setup.sh` does
 
-The script starts with `set -euo pipefail`: it stops at the first error, on any unset variable, and when any command in a pipe fails.
+The script starts with `set -euo pipefail`: it stops at the first error, on any unset variable, and when any command in a pipe fails. It then checks that it runs as root and exits with a message if not.
 
 | # | Step | Command | Why |
 |---|------|---------|-----|
-| 1 | Install Docker | `apt-get install -y docker.io ca-certificates curl`, `systemctl enable --now docker` | k3d runs every Kubernetes node as a Docker container, so Docker is the one hard dependency. |
-| 2 | Install `kubectl` (skipped if present) | download latest stable from `dl.k8s.io`, `install -m 0755` into `/usr/local/bin` | The command-line client for the cluster. |
-| 3 | Install k3d | official `install.sh` piped to `bash` | Installs the latest k3d release. |
-| 4 | Create the cluster | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer"` | See the flag table below. |
-| 5 | Give your user access | `k3d kubeconfig get iotcluster > ~/.kube/config` for `$SUDO_USER` | So `kubectl` works without `sudo`. **Overwrites** that file. Skipped when run as plain root. |
-| 6 | Create namespaces | `kubectl create namespace argocd`, `kubectl create namespace dev` | One for Argo CD, one for the app (subject requirement). |
+| 1 | Install Docker | `apt-get install -y ca-certificates curl`, plus `docker.io` **only if `docker` is missing**; `systemctl enable --now docker` | k3d runs every Kubernetes node as a Docker container, so Docker is the one hard dependency. An existing Docker (for example `docker-ce`) is never replaced, and `apt` runs non-interactive so it cannot stop on a prompt. |
+| 2 | Install `kubectl` (skipped if present) | download latest stable from `dl.k8s.io` into a temp folder (architecture from `dpkg`), `install -m 0755` into `/usr/local/bin` | The command-line client for the cluster. Nothing is left in the current directory. |
+| 3 | Install k3d (skipped if present) | official `install.sh` piped to `bash` | Installs the latest k3d release. |
+| 4 | Create the cluster (or start it) | `k3d cluster create iotcluster --servers 1 --agents 0 --port "8080:80@loadbalancer" --port "8888:8888@loadbalancer"`; if `iotcluster` already exists: `k3d cluster start iotcluster`, plus `k3d cluster edit iotcluster --port-add "8888:8888@loadbalancer"` when it does not publish 8888 yet | See the flag table below. An existing cluster is reused, never recreated; `start` also wakes it up after a reboot, and `edit --port-add` only recreates the load-balancer container, so a cluster made by an older version of the script gets port 8888 without losing anything. |
+| 5 | Give your user access | `k3d kubeconfig merge iotcluster --output ~/.kube/config` for `$SUDO_USER`, then `chown -R` of `~/.kube` | So `kubectl` works without `sudo`. **Merges** into the existing file (your other clusters stay) and makes `k3d-iotcluster` the current context. Skipped when run as plain root. |
+| 6 | Create namespaces | `kubectl create namespace <ns> --dry-run=client -o yaml \| kubectl apply -f -` for `argocd` and `dev` | One for Argo CD, one for the app (subject requirement). `apply` makes it a no-op when a namespace already exists. |
 | 7 | Install Argo CD | `kubectl apply -n argocd --server-side --force-conflicts -f …/argo-cd/stable/manifests/install.yaml` | Official install manifest. Server-side apply is needed because some Argo CD CRDs (notably ApplicationSet) are too large for client-side apply's `last-applied` annotation (262 144-byte limit). |
 | 8 | Wait until ready | `kubectl wait --for=condition=Available` on `argocd-server` and `argocd-repo-server`; `kubectl rollout status` on `argocd-application-controller` | Argo CD must be running before it is given work. |
 | 9 | Hand over to GitOps | `kubectl apply -f confs/argocd-app.yaml` | Last, because the `Application` kind only exists once Argo CD's CRDs are installed. From here on Argo CD deploys the app. |
 
-The path to `confs/` is resolved relative to the script, so it can be started from any directory. One caveat: step 2 downloads `kubectl` into the **current directory** (see [Troubleshooting](#troubleshooting)).
+The path to `confs/` is resolved relative to the script, so it can be started from any directory.
 
 **The cluster flags**
 
@@ -163,7 +165,8 @@ The path to `confs/` is resolved relative to the script, so it can be started fr
 | `iotcluster` | Cluster name. k3d names its containers `k3d-iotcluster-server-0` (the node) and `k3d-iotcluster-serverlb` (the load balancer). |
 | `--servers 1` | One K3s *server* node: the control plane (API server, scheduler, controller manager, datastore). A K3s server also runs the kubelet and is not tainted, so Pods are scheduled on it too. |
 | `--agents 0` | No separate *agent* (worker) node: one node is enough for Argo CD and the app. This is also k3d's default; the flag is written out to show the choice. |
-| `--port "8080:80@loadbalancer"` | Publish host port 8080 on port 80 of k3d's load-balancer container. It exists for a future Ingress and is **not used by the app today** (the app is reached with `port-forward`). |
+| `--port "8080:80@loadbalancer"` | Publish host port 8080 on port 80 of k3d's load-balancer container (where Traefik, the Ingress controller of K3s, listens). It is **not used by the app**: it exists for a future Ingress. |
+| `--port "8888:8888@loadbalancer"` | Publish host port 8888 on port 8888 of the node through the load balancer. K3s's built-in ServiceLB opens that port for the Service `playground-svc` (`type: LoadBalancer`), so `curl http://localhost:8888/` reaches the Pod directly. |
 
 **What you have afterwards:** `kubectl get nodes` shows one node (`control-plane`, which also runs Pods); `docker ps` shows the two `k3d-iotcluster-*` containers; and Argo CD runs in `argocd`:
 
@@ -202,7 +205,7 @@ An `Application` is one Argo CD "app": a pair of *where the YAML lives* (source)
 
 ### `manifests/deployment.yaml` — what gets deployed
 
-One file, two Kubernetes objects separated by `---`. It is a *declaration of desired state*, not a program: Kubernetes keeps working until reality matches it.
+This file lives in the **GitOps repo** (`p3/manifests/deployment.yaml`), not in this folder: it is what Argo CD reads. One file, two Kubernetes objects separated by `---`. It is a *declaration of desired state*, not a program: Kubernetes keeps working until reality matches it.
 
 **Deployment `wil-playground`** — declares how many Pods run and what they run.
 
@@ -227,7 +230,7 @@ One file, two Kubernetes objects separated by `---`. It is a *declaration of des
 | `spec.selector` | `app: playground` | Traffic goes to Pods carrying this label. |
 | `spec.ports[0].port` | `8888` | The port the Service itself listens on. |
 | `spec.ports[0].targetPort` | `8888` | The port on the Pod that traffic is forwarded to. |
-| `spec.type` | *(not set)* → `ClusterIP` | Default: reachable only inside the cluster. That is why access from outside uses `kubectl port-forward`. |
+| `spec.type` | `LoadBalancer` | Asks for an address outside the cluster. K3s's ServiceLB answers by opening port 8888 on the node, and k3d publishes it on the host (`--port "8888:8888@loadbalancer"`). Without this line the Service would be a `ClusterIP` (reachable only inside the cluster), and the app would need `kubectl port-forward`. |
 
 How the pieces find each other — everything hangs on the label `app=playground`:
 
@@ -273,11 +276,10 @@ Browse to <https://localhost:8081> (self-signed certificate: accept the warning)
 ### Reach the app
 
 ```bash
-kubectl port-forward svc/playground-svc 8888:8888 -n dev      # leave running
 curl http://localhost:8888/                                    # {"status":"ok", "message": "v1"}
 ```
 
-The app listens on 8888 and answers with a small JSON whose `message` is its version (`v1` or `v2`).
+The app listens on 8888 and answers with a small JSON whose `message` is its version (`v1` or `v2`). Host port 8888 is published by the k3d load balancer for the `LoadBalancer` Service, so there is no tunnel to start. If `curl` is refused right after `setup.sh`, the Pod is still starting: `kubectl get pods -n dev`.
 
 ### Demo: change the version through Git
 
@@ -297,7 +299,7 @@ kubectl get pods -n dev -w
 kubectl get app -n argocd              # back to Synced / Healthy
 ```
 
-Then **restart the `port-forward`** and run `curl http://localhost:8888/` again: it must now say `"message": "v2"`. The old tunnel was bound to the v1 Pod and dies when that Pod is deleted (`lost connection to pod`).
+Then run the same `curl http://localhost:8888/` again: it must now say `"message": "v2"`. Nothing to restart: the Service follows the new Pod by its label.
 
 To go back to v1, repeat with the two tags swapped.
 
@@ -321,8 +323,9 @@ Maps to the subject (Part 3 and the submission chapter).
 - [ ] The app runs in `dev`: `kubectl get pods -n dev` shows `wil-playground-…  1/1  Running`.
 - [ ] Argo CD UI shows `playground` as **Synced** and **Healthy**.
 - [ ] **Before starting:** the GitOps repo is at `v1` (see [Which version is deployed?](#which-version-is-deployed)); `curl` shows `"message": "v1"`.
-- [ ] **Live:** change the tag in GitHub, Argo CD syncs, `curl` shows `"message": "v2"` (restart the `port-forward` first).
+- [ ] **Live:** change the tag in GitHub, Argo CD syncs, the same `curl` shows `"message": "v2"`.
 - [ ] Be ready to explain: K3s vs K3d ([below](#k3s-vs-k3d)), what Argo CD does and why "pull", what a Namespace / Deployment / Service is, and what `prune` and `selfHeal` do.
+- [ ] Namespace vs Pod: a **Namespace** is a named partition of the cluster (it groups and isolates objects: `argocd`, `dev`); a **Pod** is the smallest runnable unit (one or more containers). Pods live *inside* a namespace: `kubectl get pods -n dev`.
 
 ## K3s vs K3d
 
@@ -337,17 +340,10 @@ Maps to the subject (Part 3 and the submission chapter).
 
 | Symptom | Likely cause | What to do |
 |---------|--------------|------------|
-| Re-running `setup.sh` fails at `k3d cluster create` | The cluster already exists. The script is not idempotent. | [Reset](#reset-and-cleanup), then run it again. |
-| `k3d cluster create` fails: port 8080 already allocated | Something on the host uses 8080. | Free the port or change the left side of `--port`. |
-| `kubectl port-forward … 8080:443` fails: address already in use | k3d's load balancer owns host port 8080. | Use another local port, for example `8081:443`. |
-| App is `OutOfSync` or `Unknown`, error `app path does not exist` | Wrong `path`/case in `argocd-app.yaml`, or the GitOps repo has no `p3/manifests` on that branch. | `kubectl describe app playground -n argocd`; compare with the repo on GitHub (case-sensitive). |
-| Error `repository not found` / `authentication required` | Wrong `repoURL`, or the repo is private. | Fix the URL; the repo must be public. |
-| Pod in `ImagePullBackOff` / `ErrImagePull` | No internet, Docker Hub rate limit, or a wrong tag. | `kubectl describe pod -n dev -l app=playground` and read the Events. |
 | Nothing in `dev` after several minutes | Argo CD cannot sync. | `kubectl get app -n argocd`, then `kubectl logs -n argocd deploy/argocd-repo-server --tail=50` and `kubectl logs -n argocd statefulset/argocd-application-controller --tail=50`. |
-| `curl localhost:8888` refuses, or `lost connection to pod` | The `port-forward` is not running, or its Pod was replaced. | Restart the `port-forward`. |
+| `curl localhost:8888` refuses or returns nothing | The Pod is not Ready yet, or the cluster was created without host port 8888 (older script). | `kubectl get pods -n dev`; check `docker port k3d-iotcluster-serverlb`; run `sudo bash scripts/setup.sh` again (it adds the port to an existing cluster). |
 | `permission denied` on `/var/run/docker.sock` when running `docker`/`k3d` | Your user is not in the `docker` group. | Use `sudo`, or `sudo usermod -aG docker $USER` and log in again. |
 | `kubectl` says there is no config or connection refused | The script writes `~/.kube/config` only when run through `sudo` by a non-root user. | `k3d kubeconfig merge iotcluster --kubeconfig-merge-default --kubeconfig-switch-context` (merges instead of overwriting). |
-| A stray `kubectl` file in the directory you ran the script from | The script downloads `kubectl` into the current directory and deletes it after installing. A failed or interrupted run leaves it behind (partial or complete). | Delete it (`sudo rm kubectl`). **Never commit it.** |
 
 ## Reset and cleanup
 
@@ -356,19 +352,18 @@ k3d cluster delete iotcluster          # removes the node containers and the kub
 sudo bash scripts/setup.sh             # rebuild from scratch
 ```
 
-Docker, `kubectl` and k3d stay installed; the script reuses `kubectl` when it is already there.
+Docker, `kubectl` and k3d stay installed; the script reuses them when they are already there.
 
 ## Known limitations
 
-- **Not idempotent.** A second run fails because the cluster (and the namespaces) already exist. Reset first.
-- **Overwrites `~/.kube/config`** of the user who ran `sudo`, which drops any other clusters configured there. Use `k3d kubeconfig merge` instead if you need to keep them.
+- **Switches your current `kubectl` context** to `k3d-iotcluster`. The user's `~/.kube/config` is merged (other clusters stay), not overwritten; use `kubectl config use-context` to go back.
 - **Debian/Ubuntu and amd64 only.**
 - **Nothing is version-pinned:** `kubectl` is "latest stable", k3d is the latest release, Argo CD comes from the moving `stable` manifest, and Docker is whatever `docker.io` your distro ships. A future upstream release can change behavior. To pin: set `TAG=…` for the k3d installer and use a versioned Argo CD URL (`…/argo-cd/<version>/manifests/install.yaml`).
 - **No checksum or signature checks** on downloaded binaries, and the k3d installer is piped to `bash`. Fine for a lab, not for production.
 - **The GitOps repo must be public.** No repository credentials are configured in Argo CD.
-- **`manifests/deployment.yaml` here is a reference copy.** It is not read by Argo CD and can drift from the GitOps repo.
 - **Polling, not webhooks.** Argo CD notices a push within about 3 minutes unless you trigger a refresh.
-- **Host port 8080 is mapped but unused.** There is no Ingress; the app is reachable only via `kubectl port-forward` (or from inside the cluster).
+- **Host port 8080 is mapped but unused.** There is no Ingress; the app is published on host port 8888 by its `LoadBalancer` Service instead.
+- **The app port is public on the host.** `8888` is published on all interfaces (`0.0.0.0`), so anyone on the same network can reach the app. Fine for a lab.
 - **Argo CD itself is installed imperatively** by the script. Only the `dev` app is managed by GitOps.
 
 ## References

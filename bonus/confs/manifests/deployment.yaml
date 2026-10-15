@@ -25,6 +25,7 @@ metadata: # Define metadata for the Service
   name: playground-svc # Set the Service name
   namespace: dev # Put the Service in the dev namespace
 spec: # Define the desired state of the Service
+  type: LoadBalancer # Make the Service reachable from the host (k3d publishes port 8888)
   selector: # Define which Pods receive traffic
     app: playground # Select Pods with the app=playground label
   ports: # Define the Service ports

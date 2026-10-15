@@ -56,13 +56,9 @@ echo "== application"
 check "pod in dev is Running" test "$(dev_pod_phase)" = "Running"
 echo "     image   : $(kubectl get deployment wil-playground -n dev -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo unknown)"
 
-kubectl port-forward svc/playground-svc 18888:8888 -n dev >/dev/null 2>&1 &
-pf_pid=$!
-sleep 4
-reply="$(curl -s -m 5 http://localhost:18888/ || true)"
-kill "$pf_pid" 2>/dev/null
-wait "$pf_pid" 2>/dev/null
-check "the app answers on :8888 (got: ${reply:-nothing})" test -n "$reply"
+reply="$(curl -s -m 5 http://localhost:8888/ || true)" # host port 8888 is published by the k3d load balancer (Service type LoadBalancer)
+check "the app answers on http://localhost:8888/ (got: ${reply:-nothing})" test -n "$reply"
+[ -n "$reply" ] || echo "     hint    : run 'sudo bash scripts/setup.sh' again: it publishes host port 8888 on a cluster created without it"
 
 echo
 echo "passed: $pass   failed: $fail"
